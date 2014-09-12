@@ -14,16 +14,31 @@ def gtk(parser, parent=None):
                          Gtk.STOCK_OK, Gtk.ResponseType.OK))
 
     box = dialog.get_content_area()
-#    box.set_spacing(10)
+    box.set_spacing(5)
 
     box.add(Gtk.Label(parser.description or ''))
 
-    hbox = Gtk.HBox()
-    box_names = Gtk.VBox()
-    box_values = Gtk.VBox()
+    expander = Gtk.Expander()
+    expander.set_label('Full help')
+    label_help = Gtk.Label()
+    label_help.set_markup('<tt>%s</tt>' % parser.format_help())
+    expander.add(label_help)
+    box.add(expander)
+
+    box.add(Gtk.Separator())
+
+    grid = Gtk.Grid(row_spacing=5, column_spacing=5)
 
     # TODO: take parser._get_positional_actions() into account too.
 
+    def add(name, value, help, row):
+        label = Gtk.Label(name)
+        if help:
+            label.set_tooltip_text(help)
+        grid.attach(label, 0, row, 1, 1)
+        grid.attach(value, 1, row, 1, 1)
+
+    row = 0
     for action in parser._get_optional_actions():
         name = action.dest.replace('_', ' ')
         if name == 'help':
@@ -35,27 +50,18 @@ def gtk(parser, parent=None):
         input_type = 'number' if action.type == int else 'text'
 
         if action.nargs == 0:
-            button = Gtk.CheckButton(name)
+            button = Gtk.CheckButton()
             button.set_active(action.default)
-            if action.help:
-                button.set_tooltip_text(action.help)
-            box.add(button)
+            add(name, button, action.help, row)
         elif action.nargs == 1:
-            box2 = Gtk.Box(Gtk.Orientation.HORIZONTAL, 10)
-            box2.add(Gtk.Label(name))
             if action.metavar == 'FILE':
                 button = Gtk.FileChooserButton('Select a file',
                                                Gtk.FileChooserAction.OPEN)
                 button.set_current_folder('/etc')
-                box2.add(button)
+                add(name, button, action.help, row)
             else:
-                box2.add(Gtk.Entry(text=action.default))
-            if action.help:
-                box2.set_tooltip_text(action.help)
-            box.add(box2)
+                add(name, Gtk.Entry(text=action.default), action.help, row)
         elif type(action.nargs) == int:
-            box2 = Gtk.Box(Gtk.Orientation.HORIZONTAL, 10)
-            box2.add(Gtk.Label(name))
             sw = Gtk.ScrolledWindow()
             tv = Gtk.TextView()
             tv.set_hexpand(True)
@@ -64,47 +70,27 @@ def gtk(parser, parent=None):
             for i in range(action.nargs - len(action.default)):
                 tv.get_buffer().set_text('\n')
             sw.add(tv)
-            box2.add(sw)
-            if action.help:
-                box2.set_tooltip_text(action.help)
-            box.add(box2)
+            add(name, sw, action.help, row)
         elif action.nargs in '?*+':
-            box2 = Gtk.Box(Gtk.Orientation.HORIZONTAL, 10)
-            box2.add(Gtk.Label(name))
             sw = Gtk.ScrolledWindow()
             tv = Gtk.TextView()
             tv.set_hexpand(True)
             for item in action.default:
                 tv.get_buffer().set_text(item + '\n')
             sw.add(tv)
-            box2.add(sw)
-            if action.help:
-                box2.set_tooltip_text(action.help)
-            box.add(box2)
+            add(name, sw, action.help, row)
+        row += 1
 
     for group in parser._mutually_exclusive_groups:
         last = None
         for action in group._group_actions:
             name = action.dest.replace('_', ' ')
-            last = Gtk.RadioButton.new_with_label_from_widget(last, label=name)
-            last.set_active(False) #action.default)
-            if action.help:
-                last.set_tooltip_text(action.help)
-            box.add(last) #(last, True, True, 2)
+            last = Gtk.RadioButton.new_from_widget(last)
+            last.set_active(action.default)
+            add(name, last, action.help, row)
+            row += 1
 
-    box.add(Gtk.Separator())
-#    box.add(Gtk.Label(parser.format_usage()))
-#    if parser.epilog:
-#        box.add(Gtk.Label(parser.epilog))
-
-    expander = Gtk.Expander()
-    expander.set_label('Full help')
-    expander.add(Gtk.Label(parser.format_help()))
-    box.add(expander)
-
-    hbox.add(box_names)
-    hbox.add(box_values)
-    box.add(hbox)
+    box.add(grid)
 
     return dialog
 
