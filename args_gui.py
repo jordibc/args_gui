@@ -194,19 +194,19 @@ if __name__ == '__main__':
     # Now we don't do "args = parser.parse_args()", just write a webpage:
     #print html(parser)
 
-    window = Gtk.Window(title="Scipioncito example")
-    window.connect('delete-event', Gtk.main_quit)
-    button = Gtk.Button('Open dialog')
-    dialog = gtk(parser, window)
-    def f(widget):
-        dialog.show_all()
-        response = dialog.run()
-        if response == Gtk.ResponseType.OK:
-            print 'Ok buddy'
-        elif response == Gtk.ResponseType.CANCEL:
-            print 'No worries'
-        dialog.hide()
-    button.connect('clicked', f)
-    window.add(button)
-    window.show_all()
+    dialog = gtk(parser)
+    dialog.connect('delete-event', Gtk.main_quit)
+    dialog.show_all()
+
+    # def f(widget):
+    #     response = dialog.run()
+    #     if response == Gtk.ResponseType.OK:
+    #         print 'Ok buddy'
+    #     elif response == Gtk.ResponseType.CANCEL:
+    #         print 'No worries'
+    #     dialog.hide()
+    # button.connect('clicked', f)
+    # window.add(button)
+    # window.show_all()
+
     Gtk.main()
