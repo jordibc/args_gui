@@ -23,13 +23,12 @@ def gtk(parser, parent=None):
     label_help = Gtk.Label()
     label_help.set_markup('<tt>%s</tt>' % parser.format_help())
     expander.add(label_help)
+    expander.connect('activate', lambda widget: dialog.resize(1, 1))
     box.add(expander)
 
     box.add(Gtk.Separator())
 
     grid = Gtk.Grid(row_spacing=5, column_spacing=5)
-
-    # TODO: take parser._get_positional_actions() into account too.
 
     def add(name, value, help, row):
         label = Gtk.Label(name)
@@ -39,21 +38,40 @@ def gtk(parser, parent=None):
         grid.attach(value, 1, row, 1, 1)
 
     row = 0
+    last = None  # last element on a mutually exclusive group
+    lastg = None
     for action in parser._get_optional_actions():
+        # Get name, avoid showing the "help" option if it is there.
         name = action.dest.replace('_', ' ')
         if name == 'help':
             continue
-        if any(action in g._group_actions
-               for g in parser._mutually_exclusive_groups):
+
+        # Handle the case of an option in an exclusive group first.
+        exclusive = False
+        for g in parser._mutually_exclusive_groups:
+            if action in g._group_actions:
+                # Create a new radio button in the appropriate group.
+                if lastg != g:
+                    last = None
+                last = Gtk.RadioButton.new_from_widget(last)
+                lastg = g
+
+                last.set_active(action.default)
+                add(name, last, action.help, row)
+                exclusive = True
+                break
+        if exclusive:
+            row += 1
             continue
 
+        # Show entry widgets depending on the input type.
         input_type = 'number' if action.type == int else 'text'
 
         if action.nargs == 0:
             button = Gtk.CheckButton()
             button.set_active(action.default)
             add(name, button, action.help, row)
-        elif action.nargs == 1:
+        elif action.nargs == 1 or action.nargs is None:
             if action.metavar == 'FILE':
                 button = Gtk.FileChooserButton('Select a file',
                                                Gtk.FileChooserAction.OPEN)
@@ -65,9 +83,11 @@ def gtk(parser, parent=None):
             sw = Gtk.ScrolledWindow()
             tv = Gtk.TextView()
             tv.set_hexpand(True)
-            for item in action.default:
-                tv.get_buffer().set_text(item + '\n')
-            for i in range(action.nargs - len(action.default)):
+            if action.default:
+                for item in action.default:
+                    tv.get_buffer().set_text(item + '\n')
+            for i in range(action.nargs -
+                           (len(action.default) if action.default else 0)):
                 tv.get_buffer().set_text('\n')
             sw.add(tv)
             add(name, sw, action.help, row)
@@ -81,14 +101,44 @@ def gtk(parser, parent=None):
             add(name, sw, action.help, row)
         row += 1
 
-    for group in parser._mutually_exclusive_groups:
-        last = None
-        for action in group._group_actions:
-            name = action.dest.replace('_', ' ')
-            last = Gtk.RadioButton.new_from_widget(last)
-            last.set_active(action.default)
-            add(name, last, action.help, row)
-            row += 1
+    # Handle the positional arguments.
+    # TODO: a lot of code repeated from previous code. Make it nicer.
+    for action in parser._get_positional_actions():
+        name = action.dest.replace('_', ' ')
+
+        # Show entry widgets depending on the input type.
+        input_type = 'number' if action.type == int else 'text'
+
+        if action.nargs == 1 or action.nargs is None:
+            if action.metavar == 'FILE':
+                button = Gtk.FileChooserButton('Select a file',
+                                               Gtk.FileChooserAction.OPEN)
+                button.set_current_folder('/etc')
+                add(name, button, action.help, row)
+            else:
+                add(name, Gtk.Entry(text=action.default), action.help, row)
+        elif type(action.nargs) == int:
+            sw = Gtk.ScrolledWindow()
+            tv = Gtk.TextView()
+            tv.set_hexpand(True)
+            if action.default:
+                for item in action.default:
+                    tv.get_buffer().set_text(item + '\n')
+            for i in range(action.nargs -
+                           (len(action.default) if action.default else 0)):
+                tv.get_buffer().set_text('\n')
+            sw.add(tv)
+            add(name, sw, action.help, row)
+        elif action.nargs in '?*+':
+            sw = Gtk.ScrolledWindow()
+            tv = Gtk.TextView()
+            tv.set_hexpand(True)
+            if action.default:
+                for item in action.default:
+                    tv.get_buffer().set_text(item + '\n')
+            sw.add(tv)
+            add(name, sw, action.help, row)
+        row += 1
 
     box.add(grid)
 
