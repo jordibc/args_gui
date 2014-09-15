@@ -30,6 +30,7 @@ def gtk(parser, parent=None):
 
     grid = Gtk.Grid(row_spacing=5, column_spacing=5)
 
+    # Helper functions.
     def add(name, value, help, row):
         label = Gtk.Label(name)
         if help:
@@ -37,33 +38,7 @@ def gtk(parser, parent=None):
         grid.attach(label, 0, row, 1, 1)
         grid.attach(value, 1, row, 1, 1)
 
-    row = 0
-    last = None  # last element on a mutually exclusive group
-    lastg = None
-    for action in parser._get_optional_actions():
-        # Get name, avoid showing the "help" option if it is there.
-        name = action.dest.replace('_', ' ')
-        if name == 'help':
-            continue
-
-        # Handle the case of an option in an exclusive group first.
-        exclusive = False
-        for g in parser._mutually_exclusive_groups:
-            if action in g._group_actions:
-                # Create a new radio button in the appropriate group.
-                if lastg != g:
-                    last = None
-                last = Gtk.RadioButton.new_from_widget(last)
-                lastg = g
-
-                last.set_active(action.default)
-                add(name, last, action.help, row)
-                exclusive = True
-                break
-        if exclusive:
-            row += 1
-            continue
-
+    def new_action(name, action):
         # Show entry widgets depending on the input type.
         input_type = 'number' if action.type == int else 'text'
 
@@ -95,54 +70,73 @@ def gtk(parser, parent=None):
             sw = Gtk.ScrolledWindow()
             tv = Gtk.TextView()
             tv.set_hexpand(True)
-            for item in action.default:
-                tv.get_buffer().set_text(item + '\n')
+            if action.default:
+                for item in action.default:
+                    tv.get_buffer().set_text(item + '\n')
             sw.add(tv)
             add(name, sw, action.help, row)
+
+    row = 0
+    last = None  # last element on a mutually exclusive group
+    lastg = None  # last mutually exclusive group
+    for action in parser._get_optional_actions():
+        # Get name, avoid showing the "help" option if it is there.
+        name = action.dest.replace('_', ' ')
+        if name == 'help':
+            continue
+
+        # Handle the case of an option in an exclusive group first.
+        exclusive = False
+        for g in parser._mutually_exclusive_groups:
+            if action in g._group_actions:
+                # Create a new radio button in the appropriate group.
+                if lastg != g:
+                    last = None
+                last = Gtk.RadioButton.new_from_widget(last)
+                lastg = g
+
+                last.set_active(action.default)
+                add(name, last, action.help, row)
+                exclusive = True
+                break
+        if exclusive:
+            row += 1
+            continue
+
+        new_action(name, action)
         row += 1
 
     # Handle the positional arguments.
-    # TODO: a lot of code repeated from previous code. Make it nicer.
     for action in parser._get_positional_actions():
         name = action.dest.replace('_', ' ')
-
-        # Show entry widgets depending on the input type.
-        input_type = 'number' if action.type == int else 'text'
-
-        if action.nargs == 1 or action.nargs is None:
-            if action.metavar == 'FILE':
-                button = Gtk.FileChooserButton('Select a file',
-                                               Gtk.FileChooserAction.OPEN)
-                button.set_current_folder('/etc')
-                add(name, button, action.help, row)
-            else:
-                add(name, Gtk.Entry(text=action.default), action.help, row)
-        elif type(action.nargs) == int:
-            sw = Gtk.ScrolledWindow()
-            tv = Gtk.TextView()
-            tv.set_hexpand(True)
-            if action.default:
-                for item in action.default:
-                    tv.get_buffer().set_text(item + '\n')
-            for i in range(action.nargs -
-                           (len(action.default) if action.default else 0)):
-                tv.get_buffer().set_text('\n')
-            sw.add(tv)
-            add(name, sw, action.help, row)
-        elif action.nargs in '?*+':
-            sw = Gtk.ScrolledWindow()
-            tv = Gtk.TextView()
-            tv.set_hexpand(True)
-            if action.default:
-                for item in action.default:
-                    tv.get_buffer().set_text(item + '\n')
-            sw.add(tv)
-            add(name, sw, action.help, row)
+        new_action(name, action)
         row += 1
 
     box.add(grid)
 
     return dialog
+
+
+def gtk_get_args(parser):
+    "Show a gui associate to the parser and return the selected parameters"
+    values = {}
+
+    dialog = gtk(parser)
+    dialog.connect('delete-event', Gtk.main_quit)
+    dialog.show_all()
+
+    def get_args(widget, result):
+        if result == Gtk.ResponseType.OK:
+            print 'ok, here we go'  ###
+            # TODO: populate "values"
+        else:
+            print 'nah'  ####
+        Gtk.main_quit()
+    dialog.connect('response', get_args)
+
+    Gtk.main()
+
+    return values
 
 
 def html(parser):
