@@ -13,6 +13,7 @@ def gtk(parser, parent=None):
                         (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                          Gtk.STOCK_OK, Gtk.ResponseType.OK))
 
+    dialog.name = parser.prog
     box = dialog.get_content_area()
     box.set_spacing(5)
 
@@ -45,18 +46,23 @@ def gtk(parser, parent=None):
         if action.nargs == 0:
             button = Gtk.CheckButton()
             button.set_active(action.default)
+            button.name = name
             add(name, button, action.help, row)
         elif action.nargs == 1 or action.nargs is None:
             if action.metavar == 'FILE':
                 button = Gtk.FileChooserButton('Select a file',
                                                Gtk.FileChooserAction.OPEN)
                 button.set_current_folder('/etc')
+                button.name = name
                 add(name, button, action.help, row)
             else:
-                add(name, Gtk.Entry(text=action.default), action.help, row)
+                entry = Gtk.Entry(text=action.default)
+                entry.name = name
+                add(name, entry, action.help, row)
         elif type(action.nargs) == int:
             sw = Gtk.ScrolledWindow()
             tv = Gtk.TextView()
+            tv.name = name
             tv.set_hexpand(True)
             if action.default:
                 for item in action.default:
@@ -69,6 +75,7 @@ def gtk(parser, parent=None):
         elif action.nargs in '?*+':
             sw = Gtk.ScrolledWindow()
             tv = Gtk.TextView()
+            tv.name = name
             tv.set_hexpand(True)
             if action.default:
                 for item in action.default:
@@ -93,6 +100,7 @@ def gtk(parser, parent=None):
                 if lastg != g:
                     last = None
                 last = Gtk.RadioButton.new_from_widget(last)
+                last.name = name
                 lastg = g
 
                 last.set_active(action.default)
@@ -108,8 +116,7 @@ def gtk(parser, parent=None):
 
     # Handle the positional arguments.
     for action in parser._get_positional_actions():
-        name = action.dest.replace('_', ' ')
-        new_action(name, action)
+        new_action('', action)  # empty name
         row += 1
 
     box.add(grid)
@@ -119,24 +126,70 @@ def gtk(parser, parent=None):
 
 def gtk_get_args(parser):
     "Show a gui associate to the parser and return the selected parameters"
-    values = {}
+
+    argv = []
 
     dialog = gtk(parser)
     dialog.connect('delete-event', Gtk.main_quit)
     dialog.show_all()
 
     def get_args(widget, result):
-        if result == Gtk.ResponseType.OK:
-            print 'ok, here we go'  ###
-            # TODO: populate "values"
-        else:
-            print 'nah'  ####
+        if result != Gtk.ResponseType.OK:
+            Gtk.main_quit()
+            return [] # really? why did you wake up us for dude?
+
+        # TODO: make this code below look nicer.
+
+        # Get the arguments.
+        argv = [dialog.name]
+        pending = dialog.get_children()
+        while True:
+            if not pending:
+                break
+            n = pending.pop()
+
+            if isinstance(n, Gtk.ToggleButton):
+                if n.get_active():
+                    argv.append('--%s' % n.name.replace(' ', '-'))
+            elif isinstance(n, Gtk.Entry):
+                if n.name:
+                    argv.append('--%s' % n.name.replace(' ', '-'))
+                argv.append(n.get_text())
+            elif isinstance(n, Gtk.TextView):
+                buf = n.get_buffer()
+                text = buf.get_text(buf.get_start_iter(),
+                                    buf.get_end_iter(), True)
+                if text:
+                    if n.name:
+                        argv.append('--%s' % n.name.replace(' ', '-'))
+                    argv += text.split('\n')
+            elif isinstance(n, Gtk.FileChooserButton):
+                fn = n.get_filename()
+                if n.name and fn:
+                    argv.append('--%s' % n.name.replace(' ', '-'))
+                if fn:
+                    argv.append(fn)
+
+            if hasattr(n, 'get_children'):
+                pending += n.get_children()
+
         Gtk.main_quit()
+
+        print """We could now call the program with
+   subprocess.call(%s)
+
+Or from the console as
+  %s %s""" % (argv, argv[0], ' '.join(x if x.startswith('--') else '"%s"' % x
+                                      for x in argv[1:]))
+
+        return argv  # message in a bottle...
+
     dialog.connect('response', get_args)
 
     Gtk.main()
 
-    return values
+    return argv
+    # TODO: must return the argv that get_args() returns
 
 
 def html(parser):
@@ -238,19 +291,4 @@ if __name__ == '__main__':
     # Now we don't do "args = parser.parse_args()", just write a webpage:
     #print html(parser)
 
-    dialog = gtk(parser)
-    dialog.connect('delete-event', Gtk.main_quit)
-    dialog.show_all()
-
-    # def f(widget):
-    #     response = dialog.run()
-    #     if response == Gtk.ResponseType.OK:
-    #         print 'Ok buddy'
-    #     elif response == Gtk.ResponseType.CANCEL:
-    #         print 'No worries'
-    #     dialog.hide()
-    # button.connect('clicked', f)
-    # window.add(button)
-    # window.show_all()
-
-    Gtk.main()
+    print gtk_get_args(parser)
