@@ -3,12 +3,11 @@ Create a html gui from the parser object of argparse.
 """
 
 
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk
 
 
 def gtk(parser, parent=None):
-    "Show a gtk dialog with a form extracted from the args of parser"
-
+    """Return a gtk dialog with a form extracted from the args of parser."""
     dialog = Gtk.Dialog(parser.prog, parent, 0,
                         (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                          Gtk.STOCK_OK, Gtk.ResponseType.OK))
@@ -32,10 +31,10 @@ def gtk(parser, parent=None):
     grid = Gtk.Grid(row_spacing=5, column_spacing=5)
 
     # Helper functions.
-    def add(name, value, help, row):
+    def add(name, value, helptxt, row):
         label = Gtk.Label(name)
-        if help:
-            label.set_tooltip_text(help)
+        if helptxt:
+            label.set_tooltip_text(helptxt)
         grid.attach(label, 0, row, 1, 1)
         grid.attach(value, 1, row, 1, 1)
 
@@ -125,24 +124,22 @@ def gtk(parser, parent=None):
 
 
 def gtk_get_args(parser):
-    "Show a gui associate to the parser and return the selected parameters"
-
-    argv = []
-
-    dialog = gtk(parser)
+    """Show a gui associated to the parser, return the selected parameters."""
+    dialog = gtk(parser, Gtk.Window())
     dialog.connect('delete-event', Gtk.main_quit)
     dialog.show_all()
 
     def get_args(widget, result):
         if result != Gtk.ResponseType.OK:
             Gtk.main_quit()
-            return [] # really? why did you wake up us for dude?
+            widget.argv = []  # used to "return" the value... nothing here
+            return
 
         # TODO: make this code below look nicer.
 
         # Get the arguments.
-        argv = [dialog.name]
-        pending = dialog.get_children()
+        argv = [widget.name]
+        pending = widget.get_children()
         while True:
             if not pending:
                 break
@@ -175,26 +172,19 @@ def gtk_get_args(parser):
 
         Gtk.main_quit()
 
-        print """We could now call the program with
-   subprocess.call(%s)
-
-Or from the console as
-  %s %s""" % (argv, argv[0], ' '.join(x if x.startswith('--') else '"%s"' % x
-                                      for x in argv[1:]))
-
-        return argv  # message in a bottle...
+        widget.argv = argv  # used to "return" the value
 
     dialog.connect('response', get_args)
 
+    # Will show the dialog and wait until "Ok" or "Cancel" is clicked,
+    # in which case get_args() will eventually call Gtk.main_quit().
     Gtk.main()
 
-    return argv
-    # TODO: must return the argv that get_args() returns
+    return dialog.argv
 
 
 def html(parser):
-    "Write a html page with a form extracted from the args of parser"
-
+    """Write a html page with a form extracted from the args of parser."""
     # See https://cmssdt.cern.ch/SDT/doxygen/CMSSW_5_2_7/doc/html/d5/ded/classargparse_1_1Action.html
 
     # TODO: treat parser._mutually_exclusive_groups[0]._group_actions[0]
