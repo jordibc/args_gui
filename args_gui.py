@@ -1,186 +1,241 @@
 """
-Create a html gui from the parser object of argparse.
+Create a gui from the parser object of argparse.
 """
 
-
+import gi
+gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 
 
-def gtk(parser, parent=None):
-    """Return a gtk dialog with a form extracted from the args of parser."""
+def get_argv(parser):
+    "Show a gui associated to the parser, return the selected parameters"
+    dialog = create_dialog(parser, Gtk.Window())
+    dialog.connect('delete-event', Gtk.main_quit)
+    dialog.connect('response', get_args_callback)
+    dialog.show_all()
+
+    # Will show the dialog and wait until "Ok" or "Cancel" is clicked,
+    # in which case get_args_callback() will eventually call Gtk.main_quit().
+    Gtk.main()
+
+    return dialog.argv
+
+
+def get_args_callback(widget, result):
+    "Set widget.argv to the contents of all the children widgets"
+    # Only if result == Gtk.ResponseType.OK. Also, it will stop Gtk's main
+    # loop. It is a callback function, called when clicking in the dialog.
+
+    if result != Gtk.ResponseType.OK:
+        Gtk.main_quit()
+        widget.argv = []  # used to "return" the value... nothing here
+        return
+
+    argv = []
+    last_name = ''
+    def append_name(w):
+        if not last_name.startswith('['):
+            argv.append('--%s' % last_name)
+
+    pending = widget.get_children()
+    while pending:
+        w = pending.pop()
+
+        if isinstance(w, Gtk.Label):
+            last_name = w.get_text().replace(' ', '-')
+        elif isinstance(w, Gtk.ToggleButton):
+            if w.get_active():
+                append_name(w)
+        elif isinstance(w, Gtk.Entry):
+            if w.name:
+                append_name(w)
+            argv.append(w.get_text())
+        elif isinstance(w, Gtk.TextView):
+            buf = w.get_buffer()
+            text = buf.get_text(buf.get_start_iter(),
+                                buf.get_end_iter(), True)
+            if text:
+                if w.name:
+                    append_name(w)
+                argv += text.split('\n')
+        elif isinstance(w, Gtk.FileChooserButton):
+            fn = w.get_filename()
+            if w.name and fn:
+                append_name(w)
+            if fn:
+                argv.append(fn)
+
+        if hasattr(w, 'get_children'):
+            pending += w.get_children()
+
+    Gtk.main_quit()
+
+    widget.argv = argv  # used to "return" the value
+
+
+def create_dialog(parser, parent=None):
+    "Return a gtk dialog with a form extracted from the args of parser"
     dialog = Gtk.Dialog(parser.prog, parent, 0,
                         (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                          Gtk.STOCK_OK, Gtk.ResponseType.OK))
-
     dialog.name = parser.prog
-    box = dialog.get_content_area()
-    box.set_spacing(5)
 
-    box.add(Gtk.Label(parser.description or ''))
+    box = dialog.get_content_area()  # here it's where we will put stuff
+    box.set_border_width(20)
+    box.set_spacing(20)
 
-    expander = Gtk.Expander()
-    expander.set_label('Full help')
-    label_help = Gtk.Label()
-    label_help.set_markup('<tt>%s</tt>' % parser.format_help())
-    expander.add(label_help)
-    expander.connect('activate', lambda widget: dialog.resize(1, 1))
-    box.add(expander)
-
-    box.add(Gtk.Separator())
-
-    grid = Gtk.Grid(row_spacing=5, column_spacing=5)
-
-    # Helper functions.
-    def add(name, value, helptxt, row):
-        label = Gtk.Label(name)
-        if helptxt:
-            label.set_tooltip_text(helptxt)
-        grid.attach(label, 0, row, 1, 1)
-        grid.attach(value, 1, row, 1, 1)
-
-    def new_action(name, action):
-        # Show entry widgets depending on the input type.
-        input_type = 'number' if action.type == int else 'text'
-
-        if action.nargs == 0:
-            button = Gtk.CheckButton()
-            button.set_active(action.default)
-            button.name = name
-            add(name, button, action.help, row)
-        elif action.nargs == 1 or action.nargs is None:
-            if action.metavar == 'FILE':
-                button = Gtk.FileChooserButton('Select a file',
-                                               Gtk.FileChooserAction.OPEN)
-                button.set_current_folder('/etc')
-                button.name = name
-                add(name, button, action.help, row)
-            else:
-                entry = Gtk.Entry(text=action.default)
-                entry.name = name
-                add(name, entry, action.help, row)
-        elif type(action.nargs) == int:
-            sw = Gtk.ScrolledWindow()
-            tv = Gtk.TextView()
-            tv.name = name
-            tv.set_hexpand(True)
-            if action.default:
-                for item in action.default:
-                    tv.get_buffer().set_text(item + '\n')
-            for i in range(action.nargs -
-                           (len(action.default) if action.default else 0)):
-                tv.get_buffer().set_text('\n')
-            sw.add(tv)
-            add(name, sw, action.help, row)
-        elif action.nargs in '?*+':
-            sw = Gtk.ScrolledWindow()
-            tv = Gtk.TextView()
-            tv.name = name
-            tv.set_hexpand(True)
-            if action.default:
-                for item in action.default:
-                    tv.get_buffer().set_text(item + '\n')
-            sw.add(tv)
-            add(name, sw, action.help, row)
-
-    row = 0
-    last = None  # last element on a mutually exclusive group
-    lastg = None  # last mutually exclusive group
-    for action in parser._get_optional_actions():
-        # Get name, avoid showing the "help" option if it is there.
-        name = action.dest.replace('_', ' ')
-        if name == 'help':
-            continue
-
-        # Handle the case of an option in an exclusive group first.
-        exclusive = False
-        for g in parser._mutually_exclusive_groups:
-            if action in g._group_actions:
-                # Create a new radio button in the appropriate group.
-                if lastg != g:
-                    last = None
-                last = Gtk.RadioButton.new_from_widget(last)
-                last.name = name
-                lastg = g
-
-                last.set_active(action.default)
-                add(name, last, action.help, row)
-                exclusive = True
-                break
-        if exclusive:
-            row += 1
-            continue
-
-        new_action(name, action)
-        row += 1
-
-    # Handle the positional arguments.
-    for action in parser._get_positional_actions():
-        new_action('', action)  # empty name
-        row += 1
-
-    box.add(grid)
+    box.add(Gtk.Label(parser.description or ''))  # description of program
+    args_info = get_args_info(parser.format_help())  # description of arguments
+    box.add(create_expander('Arguments', args_info, parent=dialog))
+    box.add(Gtk.Separator())  # ----
+    box.add(create_grid(parser))  # options
 
     return dialog
 
 
-def gtk_get_args(parser):
-    """Show a gui associated to the parser, return the selected parameters."""
-    dialog = gtk(parser, Gtk.Window())
-    dialog.connect('delete-event', Gtk.main_quit)
-    dialog.show_all()
+def get_args_info(full_help):
+    "Return string with only the description of arguments taken from full_help"
+    text = ''
+    include = False
+    for line in full_help.splitlines(keepends=True):
+        if (line.startswith('positional arguments:') or
+            line.startswith('optional arguments:')):
+            include = True
+        if include:
+            text += line
+    return text
 
-    def get_args(widget, result):
-        if result != Gtk.ResponseType.OK:
-            Gtk.main_quit()
-            widget.argv = []  # used to "return" the value... nothing here
-            return
 
-        # TODO: make this code below look nicer.
+def create_expander(name, text, parent):
+    "Return an expander that contains the given text"
+    # It knows how to resize its parent when opened/closed too.
+    expander = Gtk.Expander()
+    expander.set_label(name)
+    label = Gtk.Label()
+    label.set_markup('<tt>%s</tt>' % text)
+    expander.add(label)
+    expander.connect('activate', lambda widget: parent.resize(1, 1))
+    return expander
 
-        # Get the arguments.
-        argv = [widget.name]
-        pending = widget.get_children()
-        while True:
-            if not pending:
-                break
-            n = pending.pop()
 
-            if isinstance(n, Gtk.ToggleButton):
-                if n.get_active():
-                    argv.append('--%s' % n.name.replace(' ', '-'))
-            elif isinstance(n, Gtk.Entry):
-                if n.name:
-                    argv.append('--%s' % n.name.replace(' ', '-'))
-                argv.append(n.get_text())
-            elif isinstance(n, Gtk.TextView):
-                buf = n.get_buffer()
-                text = buf.get_text(buf.get_start_iter(),
-                                    buf.get_end_iter(), True)
-                if text:
-                    if n.name:
-                        argv.append('--%s' % n.name.replace(' ', '-'))
-                    argv += text.split('\n')
-            elif isinstance(n, Gtk.FileChooserButton):
-                fn = n.get_filename()
-                if n.name and fn:
-                    argv.append('--%s' % n.name.replace(' ', '-'))
-                if fn:
-                    argv.append(fn)
+def create_grid(parser):
+    "Return grid with the options"
+    grid = Gtk.Grid(row_spacing=5, column_spacing=5)
 
-            if hasattr(n, 'get_children'):
-                pending += n.get_children()
+    grid.row = 0
+    def add(name, widget, helptxt):
+        "Add a new row to the grid, that looks like: [name | widget]"
+        label = Gtk.Label(name.replace('_', ' '))
+        if helptxt:
+            label.set_tooltip_text(helptxt)
+        grid.attach(label, 0, grid.row, 1, 1)
+        grid.attach(widget, 1, grid.row, 1, 1)
+        grid.row += 1
 
-        Gtk.main_quit()
+    for i, action in enumerate(parser._get_positional_actions()):
+        name = '[Argument %d]' % (i + 1)
+        add(name, create_widget(action), action.help)
 
-        widget.argv = argv  # used to "return" the value
+    groups_widgets = [parser._mutually_exclusive_groups, {}]
+    for action in parser._get_optional_actions():
+        if action.dest != 'help':
+            widget = create_widget(action, groups_widgets)
+            add(action.dest, widget, action.help)
 
-    dialog.connect('response', get_args)
+    return grid
 
-    # Will show the dialog and wait until "Ok" or "Cancel" is clicked,
-    # in which case get_args() will eventually call Gtk.main_quit().
-    Gtk.main()
 
-    return dialog.argv
+def create_widget(action, groups_widgets=None):
+    "Return a widget for input, depending on the action type"
+    # action is an argumentparser action object.
+    name = action.dest.replace('_', ' ')
+
+    group = get_group(action, groups_widgets[0]) if groups_widgets else None
+    if group is not None:
+        return create_radio_button(name, group, groups_widgets[1],
+                                   active=action.default)
+    if action.nargs == 0:
+        return create_checkbox(name, action.default)
+    elif action.nargs in [1, None]:
+        if action.metavar and action.metavar.lower() == 'file':
+            return create_filechooser_button(name)
+        else:
+            return create_text_entry(name, text=action.default)
+    elif type(action.nargs) == int:
+        return create_multiline(name, nlines=action.nargs)
+    elif action.nargs in '?*+':
+        return create_multiline(name, nlines=1)
+
+
+def get_group(action, groups):
+    "Return the mutually exclusive group the action belongs to"
+    for group in groups:
+        if action in group._group_actions:
+            return group
+    return None  # return None for actions that are not in such a group
+
+
+def create_radio_button(name, group, widgets, active):
+    "Return a radio button and update the widgets dict if appropriate"
+    if group in widgets.keys():
+        button = Gtk.RadioButton.new_from_widget(widgets[group])
+    else:
+        button = Gtk.RadioButton()
+        widgets[group] = button
+    button.name = name
+    button.set_active(active)
+    return button
+
+
+def create_multiline(name, nlines):
+    "Return a nice scrolling window with space for nlines of values"
+    sw = Gtk.ScrolledWindow()
+    tv = Gtk.TextView()
+    tv.name = name
+    tv.set_hexpand(True)
+    tv.get_buffer().set_text('\n' * (nlines - 1))
+    sw.add(tv)
+    return sw
+
+
+def create_text_entry(name, text):
+    entry = Gtk.Entry(text=text)
+    entry.name = name
+    return entry
+
+
+def create_checkbox(name, active):
+    button = Gtk.CheckButton()
+    button.set_active(active)
+    button.name = name
+    return button
+
+
+def create_filechooser_button(name):
+    "Return a button that opens a dialog to choose a file"
+    dialog = Gtk.FileChooserDialog(
+        'Select a file', None, Gtk.FileChooserAction.OPEN,
+        (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+         Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+    add_filter(dialog, 'Any files', patterns=['*'])
+    add_filter(dialog, 'Image files', mimes=['image/jpeg', 'image/png'])
+    button = Gtk.FileChooserButton('Select a file',
+                                   Gtk.FileChooserAction.OPEN,
+                                   dialog=dialog)
+    button.set_current_folder('.')
+    button.name = name
+    return button
+
+
+def add_filter(dialog, name, mimes=[], patterns=[]):
+    "Add file filter to gtk dialog based on the given mimes and patterns"
+    filter = Gtk.FileFilter()
+    filter.set_name(name)
+    for mime in mimes:
+        filter.add_mime_type(mime)
+    for pattern in patterns:
+        filter.add_pattern(pattern)
+    dialog.add_filter(filter)
 
 
 def html(parser):
@@ -274,6 +329,7 @@ if __name__ == '__main__':
     add('--nanna', nargs=1, default='hola hola', help='whatever', metavar='FILE')
     add('--values', action='store_true',
         help='show the interest factor next to each word')
+    add('image', default='', help="a positional argument")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-v", "--verbose", action="store_true")
     group.add_argument("-q", "--quiet", action="store_true")
@@ -281,4 +337,4 @@ if __name__ == '__main__':
     # Now we don't do "args = parser.parse_args()", just write a webpage:
     #print html(parser)
 
-    print gtk_get_args(parser)
+    print(get_argv(parser))
